@@ -19,7 +19,7 @@ This PowerShell script automatically renames all files created on the current da
 #### RenameFiles.ps1
 
 ```powershell
-$folderPath = 'C:\Users\patoo\Downloads' # Specifies the folder to monitor
+$folderPath = 'C:\Users\Downloads' # Specifies the folder to monitor
 $currentDate = (Get-Date).Date # Gets the current date
 
 # Retrieves all files created today in the specified folder and its subfolders
@@ -57,7 +57,7 @@ Get-ChildItem -Path $folderPath -Recurse | Where-Object {
 ```powershell
 @echo off
 # Runs the PowerShell script with elevated privileges
-PowerShell -NoProfile -ExecutionPolicy Bypass -File "C:\Users\patoo\OneDrive\Documents\Scripts\RenameFiles.ps1"
+PowerShell -NoProfile -ExecutionPolicy Bypass -File "C:\Users\Documents\Scripts\RenameFiles.ps1"
 ```
 
 ### Notes
