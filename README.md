@@ -50,3 +50,17 @@ Get-ChildItem -Path $folderPath -Recurse | Where-Object {
         Rename-Item -Path $_.FullName -NewName $newName -ErrorAction SilentlyContinue
     }
 }
+```
+
+#### File-Renamer.bat
+
+```powershell
+@echo off
+# Runs the PowerShell script with elevated privileges
+PowerShell -NoProfile -ExecutionPolicy Bypass -File "C:\Users\patoo\OneDrive\Documents\Scripts\RenameFiles.ps1"
+```
+
+### Notes
+
+- The script only processes files created on the current date to avoid renaming older files.
+- The batch file uses the -NoProfile and -ExecutionPolicy Bypass flags to run the PowerShell script without loading the user profile and bypassing the default execution policy, respectively.
