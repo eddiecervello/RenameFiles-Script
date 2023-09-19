@@ -1,2 +1,2 @@
 @echo off
-PowerShell -NoProfile -ExecutionPolicy Bypass -File "C:\Users\patoo\OneDrive\Documents\Scripts\RenameFiles.ps1"
+PowerShell -NoProfile -ExecutionPolicy Bypass -File "C:\Users\Documents\Scripts\RenameFiles.ps1"
