@@ -1,4 +1,4 @@
-$folderPath = 'C:\Users\patoo\Downloads'
+$folderPath = 'C:\Users\Downloads'
 $currentDate = (Get-Date).Date
 
 Get-ChildItem -Path $folderPath -Recurse | Where-Object { 
