@@ -1,17 +1,24 @@
-RenameFiles Script
-Overview
+## RenameFiles Script
+
+### Overview
+
 This PowerShell script automatically renames all files created on the current day in a specified directory and its subdirectories. If a file with the new name already exists, it appends a unique suffix to avoid conflicts.
 
-Files
-RenameFiles.ps1: The main PowerShell script that handles the file renaming.
-File-Renamer.bat: A batch file to quickly and easily run the PowerShell script from a shortcut.
-Usage
-Update the $folderPath variable in RenameFiles.ps1 to the folder you want to monitor.
-Create a shortcut to File-Renamer.bat on your desktop for easy access.
-Script Breakdown
-RenameFiles.ps1
-powershell
-Copy code
+### Files
+
+- **RenameFiles.ps1**: The main PowerShell script that handles the file renaming.
+- **File-Renamer.bat**: A batch file to quickly and easily run the PowerShell script from a shortcut.
+
+### Usage
+
+1. Update the `$folderPath` variable in `RenameFiles.ps1` to the folder you want to monitor.
+2. Create a shortcut to `File-Renamer.bat` on your desktop for easy access.
+
+### Script Breakdown
+
+#### RenameFiles.ps1
+
+```powershell
 $folderPath = 'C:\Users\patoo\Downloads' # Specifies the folder to monitor
 $currentDate = (Get-Date).Date # Gets the current date
 
@@ -43,12 +50,3 @@ Get-ChildItem -Path $folderPath -Recurse | Where-Object {
         Rename-Item -Path $_.FullName -NewName $newName -ErrorAction SilentlyContinue
     }
 }
-File-Renamer.bat
-batch
-Copy code
-@echo off
-# Runs the PowerShell script with elevated privileges
-PowerShell -NoProfile -ExecutionPolicy Bypass -File "C:\Users\patoo\OneDrive\Documents\Scripts\RenameFiles.ps1"
-Notes
-The script only processes files created on the current date to avoid renaming older files.
-The batch file uses the -NoProfile and -ExecutionPolicy Bypass flags to run the PowerShell script without loading the user profile and bypassing the default execution policy, respectively.
