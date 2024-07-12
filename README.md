@@ -19,30 +19,20 @@ This project automates the process of tracking Environdent orders. It consists o
 
 1.  Clone the repository:
 
-    bash
-
-    Copy code
-
     `git clone https://github.com/hu-friedy/Environdent-Order-Tracking.git
     cd Environdent-Order-Tracking`
 
 2.  Install dependencies:
 
-    bash
-
-    Copy code
-
     `npm install`
 
 3.  Set up environment variables: Create a `.env` file in the root directory and add the following:
 
-    plaintext
-
-    Copy code
-
-    `PORT=3000
+    ```bash
+    PORT=3000
     NODE_ENV=production
-    AUTH_TOKEN=your_auth_token_here`
+    AUTH_TOKEN=your_auth_token_here
+    ```
 
 ### Configuration
 
@@ -54,35 +44,26 @@ This project automates the process of tracking Environdent orders. It consists o
 
 1.  **Run the Server:**
 
-    bash
-
-    Copy code
-
-    `node server.js`
+    ```bash
+    node server.js
+    ```
 
     Or use PM2 for continuous operation:
 
-    bash
+    ```bash
+    pm2 start server.js
+    ```
 
-    Copy code
+3.  **Run the Puppeteer Script Manually:**
 
-    `pm2 start server.js`
-
-2.  **Run the Puppeteer Script Manually:**
-
-    bash
-
-    Copy code
-
-    `node upload-script.js`
+    ```bash
+    node upload-script.js
+    ```
 
 ### File Structure
 
-plaintext
-
-Copy code
-
-`Environdent-Order-Tracking/
+```
+Environdent-Order-Tracking/
 ├── .env
 ├── .gitignore
 ├── README.md
@@ -95,7 +76,8 @@ Copy code
 ├── screenshots/
 └── logs/
     ├── combined.log
-    └── error.log`
+    └── error.log
+```
 
 -   `server.js`: The main server file.
 -   `upload-script.js`: The Puppeteer script for automation.
