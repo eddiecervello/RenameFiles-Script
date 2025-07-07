@@ -1,83 +1,57 @@
-RenameFiles Script
-------------------
+# RenameFiles Script v2.0.0
 
-[](https://github.com/eddiecervello/RenameFiles-Script/tree/5035c82674ec1735f2001b57c5d9e57bea80fdfd#renamefiles-script)
+> Cross-platform, production-safe file renamer for PowerShell 7+ (Windows, Linux, macOS)
 
-### Overview
+## Overview
 
-[](https://github.com/eddiecervello/RenameFiles-Script/tree/5035c82674ec1735f2001b57c5d9e57bea80fdfd#overview)
+This PowerShell module renames all files created today in a specified directory tree, replacing spaces and patterns with dashes. If a file with the new name exists, a unique suffix is appended. Emits JSON-lines logs for observability.
 
-This PowerShell script automatically renames all files created on the current day in a specified directory and its subdirectories. If a file with the new name already exists, it appends a unique suffix to avoid conflicts.
+## Features
+- Simple CLI: `RenameFiles.ps1 [-Path <folder>] [-WhatIf] [-LogLevel INFO|DEBUG]`
+- Cross-platform: PowerShell 7+ (pwsh) on Windows, Linux, macOS
+- No hard-coded paths; defaults to current directory
+- Safe, idempotent renaming with retry/back-off
+- JSON-lines logging (INFO/DEBUG)
+- Robust error handling
+- Dry-run mode with `-WhatIf`
 
-### Files
+## Usage
 
-[](https://github.com/eddiecervello/RenameFiles-Script/tree/5035c82674ec1735f2001b57c5d9e57bea80fdfd#files)
+```sh
+# Rename files created today in current directory (dry-run)
+pwsh ./RenameFiles.ps1 -WhatIf
 
--   RenameFiles.ps1: The main PowerShell script that handles the file renaming.
--   File-Renamer.bat: A batch file to quickly and easily run the PowerShell script from a shortcut.
-
-### Usage
-
-[](https://github.com/eddiecervello/RenameFiles-Script/tree/5035c82674ec1735f2001b57c5d9e57bea80fdfd#usage)
-
-1.  Update the `$folderPath` variable in `RenameFiles.ps1` to the folder you want to monitor.
-2.  Create a shortcut to `File-Renamer.bat` on your desktop for easy access.
-
-### Script Breakdown
-
-[](https://github.com/eddiecervello/RenameFiles-Script/tree/5035c82674ec1735f2001b57c5d9e57bea80fdfd#script-breakdown)
-
-#### RenameFiles.ps1
-
-[](https://github.com/eddiecervello/RenameFiles-Script/tree/5035c82674ec1735f2001b57c5d9e57bea80fdfd#renamefilesps1)
-
-```source-powershell
-$folderPath = 'C:\Users\Downloads' # Specifies the folder to monitor
-$currentDate = (Get-Date).Date # Gets the current date
-
-# Retrieves all files created today in the specified folder and its subfolders
-Get-ChildItem -Path $folderPath -Recurse | Where-Object {
-    !$_.PSIsContainer -and $_.CreationTime.Date -eq $currentDate
-} | ForEach-Object {
-    # Constructs the new name for each file by replacing spaces and certain patterns
-    $newName = $_.Name -replace '\s*\(\d+\)', '' -replace '\s-\s', '-' -replace ' ', '-'
-
-    if ($newName -ne $_.Name) {
-        $newFullPath = Join-Path -Path $_.Directory -ChildPath $newName
-
-        # Checks if a file with the new name already exists
-        if (Test-Path -Path $newFullPath) {
-            $currentDateSuffix = (Get-Date -UFormat "%m%d%y")
-            $baseName = [System.IO.Path]::GetFileNameWithoutExtension($newName) + "-" + $currentDateSuffix
-            $extension = [System.IO.Path]::GetExtension($newName)
-            $counter = 1
-
-            # Increments the counter until it finds a unique filename
-            while (Test-Path -Path (Join-Path -Path $_.Directory -ChildPath ($baseName + $counter + $extension))) {
-                $counter++
-            }
-            $newName = $baseName + "-" + $counter + $extension
-        }
-
-        # Renames the file with the new, unique name
-        Rename-Item -Path $_.FullName -NewName $newName -ErrorAction SilentlyContinue
-    }
-}
+# Rename files in a specific folder (real run)
+pwsh ./RenameFiles.ps1 -Path /path/to/dir
 ```
 
-#### File-Renamer.bat
+## Module API
 
-[](https://github.com/eddiecervello/RenameFiles-Script/tree/5035c82674ec1735f2001b57c5d9e57bea80fdfd#file-renamerbat)
-
-```source-powershell
-@echo off
-# Runs the PowerShell script with elevated privileges
-PowerShell -NoProfile -ExecutionPolicy Bypass -File "C:\Users\Documents\Scripts\RenameFiles.ps1"
+```powershell
+Import-Module ./RenameFiles/RenameFiles.psm1
+Rename-TodaysFiles -Path "/tmp" -WhatIf -LogLevel DEBUG
 ```
 
-### Notes
+## Architecture
 
-[](https://github.com/eddiecervello/RenameFiles-Script/tree/5035c82674ec1735f2001b57c5d9e57bea80fdfd#notes)
+```plantuml
+@startuml
+actor User
+User -> RenameFiles.ps1 : invoke (with params)
+RenameFiles.ps1 -> RenameFiles.psm1 : Import-Module
+RenameFiles.psm1 -> Rename-TodaysFiles : call
+Rename-TodaysFiles -> FileSystem : scan, rename, log
+@enduml
+```
 
--   The script only processes files created on the current date to avoid renaming older files.
--   The batch file uses the -NoProfile and -ExecutionPolicy Bypass flags to run the PowerShell script without loading the user profile and bypassing the default execution policy, respectively.
+## Logging Example
+
+```json
+{"ts":"2025-07-07T12:00:00Z","level":"INFO","msg":"Renamed 'foo (1).txt' to 'foo-070725-1.txt'"}
+```
+
+## Changelog
+See [CHANGELOG.md](CHANGELOG.md)
+
+## License
+MIT
