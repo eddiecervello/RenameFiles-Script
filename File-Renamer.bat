@@ -1,2 +1,4 @@
 @echo off
-PowerShell -NoProfile -ExecutionPolicy Bypass -File "C:\Users\Documents\Scripts\RenameFiles.ps1"
+setlocal
+cd /d "%~dp0"
+PowerShell -NoProfile -ExecutionPolicy RemoteSigned -File ".\RenameFiles.ps1"
