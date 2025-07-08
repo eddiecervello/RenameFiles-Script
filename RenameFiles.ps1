@@ -38,21 +38,44 @@ function Register-StartupTask {
     }
     
     try {
+        # Validate path security
+        if ($Path -match '\.\./|\.\.\\'|\.\.' -or $Path -match '[<>:"|?*]') {
+            throw "Invalid path contains dangerous characters: $Path"
+        }
+        
+        $resolvedPath = Resolve-Path $Path -ErrorAction Stop
+        if (-not (Test-Path $resolvedPath -PathType Container)) {
+            throw "Path is not a valid directory: $Path"
+        }
+        
         $startup = [Environment]::GetFolderPath('Startup')
         $shortcut = Join-Path $startup 'RenameFiles.lnk'
-        $target = (Get-Command pwsh).Source
-        $args = "-NoProfile -ExecutionPolicy RemoteSigned -File `"$PSScriptRoot\RenameFiles.ps1`" -Monitor -Path `"$Path`""
+        $target = (Get-Command pwsh -ErrorAction Stop).Source
         
-        $ws = New-Object -ComObject WScript.Shell
-        $sc = $ws.CreateShortcut($shortcut)
-        $sc.TargetPath = $target
-        $sc.Arguments = $args
-        $sc.WorkingDirectory = $PSScriptRoot
-        $sc.Description = "RenameFiles - Automatic file renaming utility"
-        $sc.Save()
+        # Use .NET instead of COM objects for security
+        $shell = New-Object -TypeName System.Management.Automation.Host.PSHost
         
-        Write-Host "Registered startup task: $shortcut" -ForegroundColor Green
-        Write-Host "Target path: $Path" -ForegroundColor Green
+        # Create startup script instead of shortcut for better security
+        $startupScript = Join-Path $startup 'RenameFiles-Startup.ps1'
+        $scriptContent = @"
+# RenameFiles Startup Script - Generated $(Get-Date)
+# Validates path before execution
+if (Test-Path '$resolvedPath' -PathType Container) {
+    try {
+        & '$target' -NoProfile -ExecutionPolicy RemoteSigned -File '$PSScriptRoot\RenameFiles.ps1' -Monitor -Path '$resolvedPath'
+    } catch {
+        Write-EventLog -LogName Application -Source 'RenameFiles' -EntryType Error -EventId 1000 -Message "RenameFiles startup failed: `$(`$_.Exception.Message)"
+    }
+} else {
+    Write-EventLog -LogName Application -Source 'RenameFiles' -EntryType Warning -EventId 1001 -Message "RenameFiles startup skipped - path not found: $resolvedPath"
+}
+"@
+        
+        Set-Content -Path $startupScript -Value $scriptContent -Force
+        
+        Write-Host "Registered startup script: $startupScript" -ForegroundColor Green
+        Write-Host "Target path: $resolvedPath" -ForegroundColor Green
+        Write-Host "Note: Using startup script instead of shortcut for security" -ForegroundColor Yellow
     } catch {
         Write-Error "Failed to register startup task: $($_.Exception.Message)"
     }
@@ -67,12 +90,24 @@ function Unregister-StartupTask {
     try {
         $startup = [Environment]::GetFolderPath('Startup')
         $shortcut = Join-Path $startup 'RenameFiles.lnk'
+        $startupScript = Join-Path $startup 'RenameFiles-Startup.ps1'
+        
+        $removed = $false
         
         if (Test-Path $shortcut) { 
             Remove-Item $shortcut -Force
-            Write-Host "Removed startup task: $shortcut" -ForegroundColor Green
-        } else { 
-            Write-Host "No startup shortcut found." -ForegroundColor Yellow
+            Write-Host "Removed startup shortcut: $shortcut" -ForegroundColor Green
+            $removed = $true
+        }
+        
+        if (Test-Path $startupScript) {
+            Remove-Item $startupScript -Force
+            Write-Host "Removed startup script: $startupScript" -ForegroundColor Green
+            $removed = $true
+        }
+        
+        if (-not $removed) {
+            Write-Host "No startup task found." -ForegroundColor Yellow
         }
     } catch {
         Write-Error "Failed to unregister startup task: $($_.Exception.Message)"
@@ -188,9 +223,42 @@ if ($Monitor) {
     exit
 }
 
-# Validate path parameter
-if (-not (Test-Path $Path -PathType Container)) {
-    Write-Error "Path does not exist or is not a directory: $Path"
+# Security validation for path parameter
+try {
+    # Check for path traversal attempts
+    if ($Path -match '\.\./|\.\.\\'|\.\.' -or $Path -match '[<>:"|?*]') {
+        Write-Error "Path contains invalid or dangerous characters: $Path"
+        exit 1
+    }
+    
+    # Resolve and validate path
+    $resolvedPath = Resolve-Path $Path -ErrorAction Stop
+    if (-not (Test-Path $resolvedPath -PathType Container)) {
+        Write-Error "Path does not exist or is not a directory: $Path"
+        exit 1
+    }
+    
+    # Update Path to use resolved path
+    $Path = $resolvedPath.Path
+    
+    # Additional security check - ensure path is not a system directory
+    $systemPaths = @(
+        $env:SystemRoot,
+        $env:ProgramFiles,
+        ${env:ProgramFiles(x86)},
+        "$env:SystemRoot\System32",
+        "$env:SystemRoot\SysWOW64"
+    )
+    
+    foreach ($sysPath in $systemPaths) {
+        if ($sysPath -and $Path.StartsWith($sysPath, [StringComparison]::OrdinalIgnoreCase)) {
+            Write-Warning "WARNING: Operating on system directory. Use with caution: $Path"
+            break
+        }
+    }
+    
+} catch {
+    Write-Error "Invalid path: $($_.Exception.Message)"
     exit 1
 }
 

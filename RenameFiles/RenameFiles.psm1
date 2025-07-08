@@ -4,7 +4,24 @@ function Rename-TodaysFiles {
     [CmdletBinding(SupportsShouldProcess, ConfirmImpact='Medium')]
     param(
         [Parameter(Position=0, Mandatory=$false)]
-        [ValidateScript({Test-Path $_ -PathType Container})]
+        [ValidateScript({
+            # Security validation for path
+            if ($_ -match '\.\./|\.\.\\'|\.\.' -or $_ -match '[<>:"|?*]') {
+                throw "Path contains invalid or dangerous characters: $_"
+            }
+            $resolved = Resolve-Path $_ -ErrorAction Stop
+            if (-not (Test-Path $resolved -PathType Container)) {
+                throw "Path is not a valid directory: $_"
+            }
+            # Check if it's a system directory
+            $systemPaths = @($env:SystemRoot, $env:ProgramFiles, ${env:ProgramFiles(x86)})
+            foreach ($sysPath in $systemPaths) {
+                if ($sysPath -and $resolved.Path.StartsWith($sysPath, [StringComparison]::OrdinalIgnoreCase)) {
+                    Write-Warning "WARNING: Operating on system directory: $resolved"
+                }
+            }
+            return $true
+        })]
         [string]$Path = (Get-Location).Path,
         [switch]$WhatIf,
         [ValidateSet('INFO','DEBUG','VERBOSE')]
@@ -13,10 +30,34 @@ function Rename-TodaysFiles {
         [ValidateSet('US', 'ISO', 'European')]
         [string]$DateFormat = 'US',
         [Parameter()]
+        [ValidateScript({
+            if ($_) {
+                $logPath = [System.IO.Path]::GetDirectoryName($_)
+                if ($logPath -match '\.\./|\.\.\\'|\.\.' -or $logPath -match '[<>:"|?*]') {
+                    throw "Log file path contains invalid characters: $_"
+                }
+                if (-not (Test-Path $logPath -PathType Container)) {
+                    throw "Log file directory does not exist: $logPath"
+                }
+            }
+            return $true
+        })]
         [string]$LogFile,
         [Parameter()]
+        [ValidateScript({
+            foreach ($ext in $_) {
+                if ($ext -ne '*' -and $ext -notmatch '^\.[a-zA-Z0-9]+$') {
+                    throw "Invalid file extension format: $ext"
+                }
+                if ($ext.Length -gt 10) {
+                    throw "File extension too long: $ext"
+                }
+            }
+            return $true
+        })]
         [string[]]$Extensions = @('*'),
         [Parameter()]
+        [ValidateRange(1, 10)]
         [int]$MaxRetries = 3,
         [Parameter()]
         [switch]$IncludeSubdirectories = $true
@@ -97,13 +138,37 @@ function Rename-TodaysFiles {
             $origName = $_.Name
             $origPath = $_.FullName
             
-            # Clean up the filename
+            # Security check for filename
+            if ($origName -match '\.\./|\.\.\\'|\.\.' -or $origName -match '[<>:"|?*]') {
+                & $log 'DEBUG' "Skipping file with dangerous characters: $origName"
+                $skippedFiles++
+                return
+            }
+            
+            # Limit filename length for security
+            if ($origName.Length -gt 255) {
+                & $log 'DEBUG' "Skipping file with name too long: $($origName.Substring(0, 50))..."
+                $skippedFiles++
+                return
+            }
+            
+            # Clean up the filename with security considerations
             $cleanName = $origName
             $cleanName = $cleanName -replace '\s*\(\d+\)', ''  # Remove (1), (2), etc.
             $cleanName = $cleanName -replace '\s-\s', '-'     # Replace ' - ' with '-'
             $cleanName = $cleanName -replace '\s+', '-'       # Replace spaces with dashes
             $cleanName = $cleanName -replace '-+', '-'        # Replace multiple dashes with single
             $cleanName = $cleanName -replace '^-|-$', ''      # Remove leading/trailing dashes
+            
+            # Additional security: remove any remaining dangerous characters
+            $cleanName = $cleanName -replace '[<>:"|?*]', '_'
+            
+            # Ensure the cleaned name is still valid
+            if (-not $cleanName -or $cleanName.Length -eq 0) {
+                & $log 'DEBUG' "Cleaned filename is empty, skipping: $origName"
+                $skippedFiles++
+                return
+            }
             
             & $log 'VERBOSE' "Processing file: $origName"
             
@@ -112,20 +177,51 @@ function Rename-TodaysFiles {
                 $base = [Path]::GetFileNameWithoutExtension($cleanName)
                 $ext = [Path]::GetExtension($cleanName)
                 
-                # Generate unique filename
+                # Generate unique filename with security validation
                 $finalName = $cleanName
                 $counter = 1
+                
+                # Security check for directory
+                $dir = [System.IO.Path]::GetDirectoryName($origPath)
+                if ($dir -match '\.\./|\.\.\\'|\.\.' -or $dir -match '[<>:"|?*]') {
+                    & $log 'DEBUG' "Directory path contains dangerous characters, skipping: $dir"
+                    $skippedFiles++
+                    return
+                }
                 
                 while (Test-Path (Join-Path $dir $finalName)) {
                     $finalName = "$base-$dateSuffix-$counter$ext"
                     $counter++
                     
-                    # Prevent infinite loop
-                    if ($counter -gt 1000) {
+                    # Prevent infinite loop and potential DoS
+                    if ($counter -gt 100) {
                         & $log 'DEBUG' "Too many naming conflicts for '$origName', skipping" $_.Exception
                         $skippedFiles++
                         return
                     }
+                    
+                    # Additional security check on generated filename
+                    if ($finalName.Length -gt 255) {
+                        & $log 'DEBUG' "Generated filename too long for '$origName', skipping"
+                        $skippedFiles++
+                        return
+                    }
+                }
+                
+                # Final security validation of target path
+                $targetPath = Join-Path $dir $finalName
+                try {
+                    $resolvedTarget = [System.IO.Path]::GetFullPath($targetPath)
+                    $resolvedDir = [System.IO.Path]::GetFullPath($dir)
+                    if (-not $resolvedTarget.StartsWith($resolvedDir, [StringComparison]::OrdinalIgnoreCase)) {
+                        & $log 'DEBUG' "Target path outside directory, skipping: $origName"
+                        $skippedFiles++
+                        return
+                    }
+                } catch {
+                    & $log 'DEBUG' "Invalid target path for '$origName', skipping: $($_.Exception.Message)"
+                    $skippedFiles++
+                    return
                 }
                 
                 if ($PSCmdlet.ShouldProcess($origPath, "Rename to $finalName")) {
