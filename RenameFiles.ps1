@@ -1,13 +1,46 @@
+#requires -version 7.0
+<#
+.SYNOPSIS
+    Cross-platform file renaming utility for cleaning up filenames
+.DESCRIPTION
+    Renames files created today by replacing spaces with dashes and removing numeric suffixes
+.EXAMPLE
+    .\RenameFiles.ps1 -Path C:\Users\Downloads
+.EXAMPLE
+    .\RenameFiles.ps1 -Monitor -Path C:\Users\Downloads
+.EXAMPLE
+    .\RenameFiles.ps1 -Path C:\Users\Downloads -WhatIf
+.NOTES
+    If you get execution policy errors, run:
+    pwsh -ExecutionPolicy Bypass -File .\RenameFiles.ps1 [parameters]
+    
+    Or run the setup wizard first:
+    pwsh -ExecutionPolicy Bypass -File .\Setup-RenameFiles.ps1
+#>
+
 #region PowerShell 7+ version check
 if ($PSVersionTable.PSVersion.Major -lt 7) {
     Write-Error "This script requires PowerShell 7.0 or higher. Please install PowerShell 7+ from https://aka.ms/pwsh and run with 'pwsh'."
+    Write-Host "Download from: https://github.com/PowerShell/PowerShell/releases" -ForegroundColor Yellow
     exit 1
+}
+#endregion
+
+#region Execution Policy Check
+$executionPolicy = Get-ExecutionPolicy -Scope CurrentUser
+if ($executionPolicy -eq 'Restricted' -or $executionPolicy -eq 'AllSigned') {
+    Write-Warning "PowerShell execution policy is restrictive: $executionPolicy"
+    Write-Host "To fix this, run one of these commands:" -ForegroundColor Yellow
+    Write-Host "1. Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser" -ForegroundColor Green
+    Write-Host "2. Or run with: pwsh -ExecutionPolicy Bypass -File .\RenameFiles.ps1 [parameters]" -ForegroundColor Green
+    Write-Host "3. Or run the setup wizard: pwsh -ExecutionPolicy Bypass -File .\Setup-RenameFiles.ps1" -ForegroundColor Green
+    Write-Host ""
 }
 #endregion
 
 param(
     [Parameter(Position=0, Mandatory=$false)]
-    [string]$Path = (Get-Location).Path,
+    [string]$Path,
     [switch]$Background,
     [switch]$RegisterStartup,
     [switch]$UnregisterStartup,
@@ -16,18 +49,78 @@ param(
     [string]$LogLevel = 'INFO',
     [string]$LogFile,
     [ValidateSet('US', 'ISO', 'European')]
-    [string]$DateFormat = 'US',
-    [string[]]$Extensions = @('*'),
-    [switch]$IncludeSubdirectories = $true,
+    [string]$DateFormat,
+    [string[]]$Extensions,
+    [switch]$IncludeSubdirectories,
     [int]$MaxRetries = 3,
-    [int]$MonitorInterval = 5
+    [int]$MonitorInterval = 5,
+    [switch]$Setup,
+    [switch]$WhatIf
 )
+
+# Handle setup wizard
+if ($Setup) {
+    $setupScript = Join-Path $PSScriptRoot "Setup-RenameFiles.ps1"
+    if (Test-Path $setupScript) {
+        & $setupScript
+        exit 0
+    } else {
+        Write-Error "Setup script not found: $setupScript"
+        exit 1
+    }
+}
+
+# Load configuration if it exists
+$configPath = Join-Path $PSScriptRoot "RenameFiles-Config.json"
+$config = $null
+if (Test-Path $configPath) {
+    try {
+        $config = Get-Content $configPath | ConvertFrom-Json
+        Write-Verbose "Loaded configuration from: $configPath"
+    } catch {
+        Write-Warning "Failed to load configuration: $($_.Exception.Message)"
+    }
+}
+
+# Set defaults from config or fallback defaults
+if (-not $Path) {
+    $Path = if ($config -and $config.WatchPath) { 
+        $config.WatchPath 
+    } else { 
+        (Get-Location).Path 
+    }
+}
+
+if (-not $DateFormat) {
+    $DateFormat = if ($config -and $config.DateFormat) { 
+        $config.DateFormat 
+    } else { 
+        'US' 
+    }
+}
+
+if (-not $Extensions) {
+    $Extensions = if ($config -and $config.Extensions) { 
+        $config.Extensions 
+    } else { 
+        @('*') 
+    }
+}
+
+if (-not $PSBoundParameters.ContainsKey('IncludeSubdirectories')) {
+    $IncludeSubdirectories = if ($config -and $config.PSObject.Properties['IncludeSubdirectories']) { 
+        $config.IncludeSubdirectories 
+    } else { 
+        $true 
+    }
+}
 
 # Import module
 try {
     Import-Module "$PSScriptRoot/RenameFiles/RenameFiles.psd1" -Force
 } catch {
     Write-Error "Failed to import RenameFiles module: $($_.Exception.Message)"
+    Write-Host "Make sure the RenameFiles directory and module files exist." -ForegroundColor Yellow
     exit 1
 }
 
@@ -262,6 +355,25 @@ try {
     exit 1
 }
 
+# Show first-run help if no config exists and no parameters provided
+if (-not $config -and $args.Count -eq 0 -and -not $PSBoundParameters.Keys) {
+    Write-Host "" 
+    Write-Host "Welcome to RenameFiles!" -ForegroundColor Cyan
+    Write-Host "" 
+    Write-Host "This appears to be your first run. Here are your options:" -ForegroundColor Yellow
+    Write-Host "" 
+    Write-Host "1. Run the setup wizard (recommended):" -ForegroundColor Green
+    Write-Host "   pwsh -ExecutionPolicy Bypass -File .\Setup-RenameFiles.ps1" -ForegroundColor White
+    Write-Host "" 
+    Write-Host "2. Or run directly with a path:" -ForegroundColor Green
+    Write-Host "   pwsh -ExecutionPolicy Bypass -File .\RenameFiles.ps1 -Path 'C:\Users\$env:USERNAME\Downloads'" -ForegroundColor White
+    Write-Host "" 
+    Write-Host "3. Test first with dry-run:" -ForegroundColor Green
+    Write-Host "   pwsh -ExecutionPolicy Bypass -File .\RenameFiles.ps1 -Path 'C:\Users\$env:USERNAME\Downloads' -WhatIf" -ForegroundColor White
+    Write-Host "" 
+    exit 0
+}
+
 # Build parameters for the main function
 $renameParams = @{
     Path = $Path
@@ -276,18 +388,39 @@ if ($LogFile) {
     $renameParams.LogFile = $LogFile
 }
 
+if ($WhatIf) {
+    $renameParams.WhatIf = $true
+}
+
 try {
+    if ($WhatIf) {
+        Write-Host "DRY RUN MODE - No files will be renamed" -ForegroundColor Yellow
+    }
     Write-Host "Starting file rename operation" -ForegroundColor Cyan
+    Write-Host "Path: $Path" -ForegroundColor Gray
+    Write-Host "Extensions: $($Extensions -join ', ')" -ForegroundColor Gray
+    Write-Host "Date format: $DateFormat" -ForegroundColor Gray
+    Write-Host "Include subdirectories: $IncludeSubdirectories" -ForegroundColor Gray
+    Write-Host ""
+    
     $result = Rename-TodaysFiles @renameParams
     
     if ($result.TotalFiles -eq 0) {
         Write-Host "No files found to process" -ForegroundColor Yellow
     } else {
+        Write-Host "" 
         Write-Host "Operation completed successfully" -ForegroundColor Green
+        Write-Host "Total files: $($result.TotalFiles)" -ForegroundColor Cyan
+        Write-Host "Renamed: $($result.RenamedFiles)" -ForegroundColor Green
+        Write-Host "Skipped: $($result.SkippedFiles)" -ForegroundColor Yellow
+        if ($result.ErrorFiles -gt 0) {
+            Write-Host "Errors: $($result.ErrorFiles)" -ForegroundColor Red
+        }
     }
     
     exit 0
 } catch {
     Write-Error "Error during file rename operation: $($_.Exception.Message)"
+    Write-Host "Try running with -WhatIf first to test the operation." -ForegroundColor Yellow
     exit 1
 }

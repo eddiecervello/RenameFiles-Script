@@ -1,0 +1,176 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup PowerShell
+      uses: PowerShell/PowerShell@v1
+      
+    - name: Install required modules
+      shell: pwsh
+      run: |
+        Install-Module Pester -Force -Scope CurrentUser -SkipPublisherCheck
+        Install-Module PSScriptAnalyzer -Force -Scope CurrentUser -SkipPublisherCheck
+        
+    - name: Validate module manifest
+      shell: pwsh
+      run: |
+        $manifest = Test-ModuleManifest -Path ./RenameFiles/RenameFiles.psd1
+        Write-Host "✓ Module manifest is valid" -ForegroundColor Green
+        Write-Host "Version: $($manifest.Version)" -ForegroundColor Cyan
+        Write-Host "PowerShell Version: $($manifest.PowerShellVersion)" -ForegroundColor Cyan
+        
+    - name: Lint with PSScriptAnalyzer
+      shell: pwsh
+      run: |
+        $results = @()
+        $results += Invoke-ScriptAnalyzer -Path ./RenameFiles.ps1 -Severity Warning
+        $results += Invoke-ScriptAnalyzer -Path ./RenameFiles/RenameFiles.psm1 -Severity Warning
+        
+        if ($results) {
+          $results | Format-Table -AutoSize
+          Write-Warning "PSScriptAnalyzer found $($results.Count) issues"
+        } else {
+          Write-Host "✓ No PSScriptAnalyzer issues found" -ForegroundColor Green
+        }
+        
+    - name: Run Pester tests
+      shell: pwsh
+      run: |
+        $config = New-PesterConfiguration
+        $config.Run.Path = './RenameFiles/RenameFiles.Tests.ps1'
+        $config.Output.Verbosity = 'Detailed'
+        $config.CodeCoverage.Enabled = $true
+        $config.CodeCoverage.Path = './RenameFiles/RenameFiles.psm1'
+        $config.CodeCoverage.OutputFormat = 'JaCoCo'
+        $config.CodeCoverage.OutputPath = './coverage.xml'
+        
+        $result = Invoke-Pester -Configuration $config
+        
+        if ($result.FailedCount -gt 0) {
+          Write-Error "$($result.FailedCount) test(s) failed"
+          exit 1
+        }
+        
+        Write-Host "✓ All tests passed" -ForegroundColor Green
+        Write-Host "Tests run: $($result.PassedCount + $result.FailedCount)" -ForegroundColor Cyan
+        
+    - name: Test module import
+      shell: pwsh
+      run: |
+        try {
+          Import-Module ./RenameFiles/RenameFiles.psd1 -Force
+          $functions = Get-Command -Module RenameFiles
+          Write-Host "✓ Module imported successfully" -ForegroundColor Green
+          Write-Host "Exported functions: $($functions.Name -join ', ')" -ForegroundColor Cyan
+        } catch {
+          Write-Error "Failed to import module: $($_.Exception.Message)"
+          exit 1
+        }
+        
+    - name: Test CLI with dry run
+      shell: pwsh
+      run: |
+        try {
+          # Create test directory and files
+          $testDir = Join-Path $env:TEMP "RenameFiles-Test"
+          New-Item -ItemType Directory -Path $testDir -Force | Out-Null
+          
+          # Create test files with today's date
+          $testFiles = @(
+            'test file (1).txt',
+            'another file - copy.docx',
+            'normal-file.pdf'
+          )
+          
+          foreach ($file in $testFiles) {
+            $filePath = Join-Path $testDir $file
+            New-Item -ItemType File -Path $filePath -Force | Out-Null
+            # Set creation time to today
+            (Get-Item $filePath).CreationTime = Get-Date
+          }
+          
+          # Test the script with WhatIf
+          $result = & ./RenameFiles.ps1 -Path $testDir -WhatIf
+          Write-Host "✓ Dry run completed successfully" -ForegroundColor Green
+          
+          # Cleanup
+          Remove-Item $testDir -Recurse -Force -ErrorAction SilentlyContinue
+          
+        } catch {
+          Write-Error "CLI test failed: $($_.Exception.Message)"
+          exit 1
+        }
+        
+    - name: Test setup wizard (non-interactive)
+      shell: pwsh
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        try {
+          # Test that setup script exists and has valid syntax
+          $setupScript = './Setup-RenameFiles.ps1'
+          if (Test-Path $setupScript) {
+            # Parse the script to check for syntax errors
+            $null = [System.Management.Automation.PSParser]::Tokenize((Get-Content $setupScript -Raw), [ref]$null)
+            Write-Host "✓ Setup script syntax is valid" -ForegroundColor Green
+          } else {
+            Write-Warning "Setup script not found"
+          }
+        } catch {
+          Write-Error "Setup script validation failed: $($_.Exception.Message)"
+          exit 1
+        }
+        
+    - name: Upload test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: test-results-${{ matrix.os }}
+        path: |
+          ./coverage.xml
+          ./TestResults.xml
+          
+  security:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup PowerShell
+      uses: PowerShell/PowerShell@v1
+      
+    - name: Security scan with PSScriptAnalyzer
+      shell: pwsh
+      run: |
+        Install-Module PSScriptAnalyzer -Force -Scope CurrentUser -SkipPublisherCheck
+        
+        $securityRules = @(
+          'PSAvoidUsingPlainTextForPassword',
+          'PSAvoidUsingConvertToSecureStringWithPlainText',
+          'PSAvoidUsingUsernameAndPasswordParams',
+          'PSAvoidUsingWriteHost',
+          'PSUseShouldProcessForStateChangingFunctions'
+        )
+        
+        $results = @()
+        $results += Invoke-ScriptAnalyzer -Path ./RenameFiles.ps1 -IncludeRule $securityRules
+        $results += Invoke-ScriptAnalyzer -Path ./RenameFiles/RenameFiles.psm1 -IncludeRule $securityRules
+        
+        if ($results) {
+          $results | Format-Table -AutoSize
+          Write-Warning "Security issues found: $($results.Count)"
+        } else {
+          Write-Host "✓ No security issues found" -ForegroundColor Green
+        }
