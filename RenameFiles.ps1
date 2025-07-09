@@ -132,7 +132,7 @@ function Register-StartupTask {
     
     try {
         # Validate path security
-        if ($Path -match '\.\./|\.\.\\'|\.\.' -or $Path -match '[<>:"|?*]') {
+        if ($Path -match '\.\./|\.\.\\|\.\.' -or $Path -match '[<>:"|?*]') {
             throw "Invalid path contains dangerous characters: $Path"
         }
         
@@ -142,25 +142,22 @@ function Register-StartupTask {
         }
         
         $startup = [Environment]::GetFolderPath('Startup')
-        $shortcut = Join-Path $startup 'RenameFiles.lnk'
         $target = (Get-Command pwsh -ErrorAction Stop).Source
-        
-        # Use .NET instead of COM objects for security
-        $shell = New-Object -TypeName System.Management.Automation.Host.PSHost
         
         # Create startup script instead of shortcut for better security
         $startupScript = Join-Path $startup 'RenameFiles-Startup.ps1'
+        $generatedDate = Get-Date
         $scriptContent = @"
-# RenameFiles Startup Script - Generated $(Get-Date)
+# RenameFiles Startup Script - Generated $generatedDate
 # Validates path before execution
-if (Test-Path '$resolvedPath' -PathType Container) {
+if (Test-Path "$resolvedPath" -PathType Container) {
     try {
-        & '$target' -NoProfile -ExecutionPolicy RemoteSigned -File '$PSScriptRoot\RenameFiles.ps1' -Monitor -Path '$resolvedPath'
+        & "$target" -NoProfile -ExecutionPolicy RemoteSigned -File "$PSScriptRoot\RenameFiles.ps1" -Monitor -Path "$resolvedPath"
     } catch {
-        Write-EventLog -LogName Application -Source 'RenameFiles' -EntryType Error -EventId 1000 -Message "RenameFiles startup failed: `$(`$_.Exception.Message)"
+        Write-EventLog -LogName Application -Source "RenameFiles" -EntryType Error -EventId 1000 -Message "RenameFiles startup failed: `$(`$_.Exception.Message)"
     }
 } else {
-    Write-EventLog -LogName Application -Source 'RenameFiles' -EntryType Warning -EventId 1001 -Message "RenameFiles startup skipped - path not found: $resolvedPath"
+    Write-EventLog -LogName Application -Source "RenameFiles" -EntryType Warning -EventId 1001 -Message "RenameFiles startup skipped - path not found: $resolvedPath"
 }
 "@
         
@@ -223,7 +220,10 @@ if ($Background) {
         
         if ($LogFile) { $argList += @('-LogFile', "`"$LogFile`"") }
         if ($DateFormat -ne 'US') { $argList += @('-DateFormat', $DateFormat) }
-        if ($Extensions -ne @('*')) { $argList += @('-Extensions', ($Extensions -join ',')) }
+        if ($Extensions -ne @('*')) { 
+            $extensionString = $Extensions -join ','
+            $argList += @('-Extensions', $extensionString) 
+        }
         if (-not $IncludeSubdirectories) { $argList += '-IncludeSubdirectories:$false' }
         if ($MaxRetries -ne 3) { $argList += @('-MaxRetries', $MaxRetries) }
         if ($Monitor) { $argList += '-Monitor' }
@@ -262,7 +262,17 @@ if ($Monitor) {
                 $now = Get-Date
                 if (($now - $script:lastRun).TotalSeconds -ge $using:MonitorInterval) {
                     Write-Host "File change detected, running rename operation..." -ForegroundColor Yellow
-                    $result = Rename-TodaysFiles -Path $using:Path -LogLevel $using:LogLevel -DateFormat $using:DateFormat -Extensions $using:Extensions -IncludeSubdirectories $using:IncludeSubdirectories -MaxRetries $using:MaxRetries -LogFile $using:LogFile
+                    $renameParams = @{
+                        Path = $using:Path
+                        LogLevel = $using:LogLevel
+                        DateFormat = $using:DateFormat
+                        Extensions = $using:Extensions
+                        IncludeSubdirectories = $using:IncludeSubdirectories
+                        MaxRetries = $using:MaxRetries
+                    }
+                    if ($using:LogFile) { $renameParams.LogFile = $using:LogFile }
+                    
+                    $result = Rename-TodaysFiles @renameParams
                     if ($result.RenamedFiles -gt 0) {
                         Write-Host "Renamed $($result.RenamedFiles) files" -ForegroundColor Green
                     }
@@ -298,7 +308,17 @@ if ($Monitor) {
                     $null = & inotifywait @watchArgs 2>/dev/null
                     if ($LASTEXITCODE -eq 0) {
                         Write-Host "File change detected, running rename operation..." -ForegroundColor Yellow
-                        $result = Rename-TodaysFiles -Path $Path -LogLevel $LogLevel -DateFormat $DateFormat -Extensions $Extensions -IncludeSubdirectories $IncludeSubdirectories -MaxRetries $MaxRetries -LogFile $LogFile
+                        $renameParams = @{
+                            Path = $Path
+                            LogLevel = $LogLevel
+                            DateFormat = $DateFormat
+                            Extensions = $Extensions
+                            IncludeSubdirectories = $IncludeSubdirectories
+                            MaxRetries = $MaxRetries
+                        }
+                        if ($LogFile) { $renameParams.LogFile = $LogFile }
+                        
+                        $result = Rename-TodaysFiles @renameParams
                         if ($result.RenamedFiles -gt 0) {
                             Write-Host "Renamed $($result.RenamedFiles) files" -ForegroundColor Green
                         }
@@ -319,7 +339,7 @@ if ($Monitor) {
 # Security validation for path parameter
 try {
     # Check for path traversal attempts
-    if ($Path -match '\.\./|\.\.\\'|\.\.' -or $Path -match '[<>:"|?*]') {
+    if ($Path -match '\.\./|\.\.\\|\.\.' -or $Path -match '[<>:"|?*]') {
         Write-Error "Path contains invalid or dangerous characters: $Path"
         exit 1
     }
@@ -398,7 +418,8 @@ try {
     }
     Write-Host "Starting file rename operation" -ForegroundColor Cyan
     Write-Host "Path: $Path" -ForegroundColor Gray
-    Write-Host "Extensions: $($Extensions -join ', ')" -ForegroundColor Gray
+    $extensionList = $Extensions -join ', '
+    Write-Host "Extensions: $extensionList" -ForegroundColor Gray
     Write-Host "Date format: $DateFormat" -ForegroundColor Gray
     Write-Host "Include subdirectories: $IncludeSubdirectories" -ForegroundColor Gray
     Write-Host ""
